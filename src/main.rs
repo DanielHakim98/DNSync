@@ -63,6 +63,13 @@ fn main() -> std::io::Result<()> {
     }
 }
 
+fn is_tailscale_exists() -> io::Result<bool> {
+    Command::new("tailscale")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+}
+
 fn list_tailscale_ip() -> io::Result<Vec<(String, String)>> {
     let output = Command::new("tailscale").arg("status").output()?;
 
@@ -92,13 +99,6 @@ fn list_tailscale_ip() -> io::Result<Vec<(String, String)>> {
     }
 
     Ok(result)
-}
-
-fn is_tailscale_exists() -> io::Result<bool> {
-    Command::new("tailscale")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
 }
 
 fn write_file(
