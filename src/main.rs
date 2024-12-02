@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, Write};
+use std::path::Path;
 
 fn main() -> std::io::Result<()> {
-    let filepath = "/etc/hosts";
+    let filepath = Path::new("/etc/hosts");
     let file = File::open(filepath)?;
     let reader = io::BufReader::new(file);
 
     let tmp_dir = std::env::temp_dir();
     // let tmp_hosts_old = tmp_dir.join("hosts.old");
-    let tmp_hosts = tmp_dir.join("hosts");
+    let tmp_hosts = tmp_dir.join(filepath.file_name().unwrap());
 
     let mut ip_host_map: HashMap<String, Vec<String>> = HashMap::new();
 
