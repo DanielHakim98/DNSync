@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn main() -> std::io::Result<()> {
     let filepath = Path::new("/etc/hosts");
@@ -9,7 +10,6 @@ fn main() -> std::io::Result<()> {
     let reader = io::BufReader::new(file);
 
     let tmp_dir = std::env::temp_dir();
-    // let tmp_hosts_old = tmp_dir.join("hosts.old");
     let tmp_hosts = tmp_dir.join(filepath.file_name().unwrap());
 
     let mut ip_host_map: HashMap<String, Vec<String>> = HashMap::new();
@@ -35,30 +35,40 @@ fn main() -> std::io::Result<()> {
 
         let ip_hostname_split: Vec<&str> = ip_hostname.split_whitespace().collect();
         if let Some((ip, hosts)) = ip_hostname_split.split_first() {
-            // println!("ip: {}", ip);
-            // print!("host: ");
             for host in hosts {
-                // print!("{} ",host);
                 ip_host_map
                     .entry(ip.to_string())
                     .or_insert_with(Vec::new)
                     .push(host.to_string());
             }
-            // println!("");
         }
-        // println!("{:#?}", ip_hostname_split)
     }
 
-    // for (ip, hosts) in &ip_host_map {
-    //     println!("IP: {}, Hosts: {:?}", ip, hosts);
-    // }
+    match is_tailscale_exists() {
+        Ok(_) => write_file(&ip_host_map, &tmp_hosts),
+        Err(_) => Ok(()),
+    }
+}
+
+fn is_tailscale_exists() -> io::Result<bool> {
+    let output = Command::new("tailscale").arg("--version").output();
+    match output {
+        Ok(o) if o.status.success() => Ok(true),
+        _ => Ok(false),
+    }
+}
+
+fn write_file(
+    ip_host_map: &HashMap<String, Vec<String>>,
+    tmp_hosts: &PathBuf,
+) -> std::io::Result<()> {
     let mut hosts_file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .open(tmp_hosts)?;
 
-    for (ip, hosts) in &ip_host_map {
+    for (ip, hosts) in ip_host_map {
         hosts_file.write_all(ip.as_bytes())?;
         hosts_file.write_all(b" ")?;
         let mut host_iter = hosts.iter().peekable();
@@ -70,6 +80,5 @@ fn main() -> std::io::Result<()> {
         }
         hosts_file.write_all(b"\n")?;
     }
-
     Ok(())
 }
