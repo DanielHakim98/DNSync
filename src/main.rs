@@ -10,7 +10,14 @@ fn main() -> std::io::Result<()> {
     let reader = io::BufReader::new(file);
 
     let tmp_dir = std::env::temp_dir();
-    let tmp_hosts = tmp_dir.join(filepath.file_name().unwrap());
+    let tmp_hosts = if let Some(file_name) = filepath.file_name() {
+        tmp_dir.join(file_name)
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "No file name in path",
+        ));
+    };
 
     let mut ip_host_map: HashMap<String, Vec<String>> = HashMap::new();
 
@@ -23,15 +30,11 @@ fn main() -> std::io::Result<()> {
                 if not_empty_line && not_starting_with_hastag {
                     line_str.to_string()
                 } else {
-                    String::new()
+                    continue;
                 }
             }
-            Err(_) => String::new(),
+            Err(_) => continue,
         };
-
-        if ip_hostname.is_empty() {
-            continue;
-        }
 
         let ip_hostname_split: Vec<&str> = ip_hostname.split_whitespace().collect();
         if let Some((ip, hosts)) = ip_hostname_split.split_first() {
@@ -81,15 +84,21 @@ fn list_tailscale_ip() -> io::Result<Vec<(String, String)>> {
         }
     }
 
+    if result.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "No Tailscale IP found",
+        ));
+    }
+
     Ok(result)
 }
 
 fn is_tailscale_exists() -> io::Result<bool> {
-    let output = Command::new("tailscale").arg("--version").output();
-    match output {
-        Ok(o) if o.status.success() => Ok(true),
-        _ => Ok(false),
-    }
+    Command::new("tailscale")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
 }
 
 fn write_file(
@@ -103,15 +112,8 @@ fn write_file(
         .open(tmp_hosts)?;
 
     for (ip, hosts) in ip_host_map {
-        hosts_file.write_all(ip.as_bytes())?;
-        hosts_file.write_all(b" ")?;
-        let mut host_iter = hosts.iter().peekable();
-        while let Some(host) = host_iter.next() {
-            hosts_file.write_all(host.as_bytes())?;
-            if host_iter.peek().is_some() {
-                hosts_file.write_all(b" ")?;
-            }
-        }
+        let line = format!("{} {}", ip, hosts.join(" "));
+        hosts_file.write_all(line.as_bytes())?;
         hosts_file.write_all(b"\n")?;
     }
     Ok(())
