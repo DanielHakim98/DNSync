@@ -45,9 +45,36 @@ fn main() -> std::io::Result<()> {
     }
 
     match is_tailscale_exists() {
-        Ok(_) => write_file(&ip_host_map, &tmp_hosts),
+        Ok(_) => {
+            println!("{:#?}", list_tailscale_ip().unwrap());
+            write_file(&ip_host_map, &tmp_hosts)
+        }
         Err(_) => Ok(()),
     }
+}
+
+fn list_tailscale_ip() -> io::Result<Vec<(String, String)>> {
+    let output = Command::new("tailscale").arg("status").output()?;
+
+    if !output.status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "Failed to get Tailscale status",
+        ));
+    }
+
+    let output_str = String::from_utf8_lossy(&output.stdout);
+    let mut result = Vec::new();
+
+    for line in output_str.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+
+        if parts.len() >= 2 {
+            result.push((parts[0].to_string(), parts[1].to_string()));
+        }
+    }
+
+    Ok(result)
 }
 
 fn is_tailscale_exists() -> io::Result<bool> {
