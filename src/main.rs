@@ -46,7 +46,14 @@ fn main() -> std::io::Result<()> {
 
     match is_tailscale_exists() {
         Ok(_) => {
-            println!("{:#?}", list_tailscale_ip().unwrap());
+            let tailscale_ip_host = list_tailscale_ip().unwrap();
+            for tup in tailscale_ip_host {
+                let (ip, hostname) = tup;
+                ip_host_map
+                    .entry(ip)
+                    .or_insert_with(Vec::new)
+                    .push(hostname);
+            }
             write_file(&ip_host_map, &tmp_hosts)
         }
         Err(_) => Ok(()),
