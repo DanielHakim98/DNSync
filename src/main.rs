@@ -1,12 +1,20 @@
+use clap::Parser;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
+#[derive(Parser, Debug)]
+struct Cli {
+    #[arg(short, long, default_value = "/etc/hosts")]
+    path: PathBuf,
+}
+
 fn main() -> std::io::Result<()> {
-    let filepath = Path::new("/etc/hosts");
-    let file = File::open(filepath)?;
+    let args = Cli::parse();
+    let filepath = args.path;
+    let file = File::open(&filepath)?;
     let reader = io::BufReader::new(file);
 
     let mut ip_host_map: HashMap<String, Vec<String>> = HashMap::new();
