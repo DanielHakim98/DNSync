@@ -21,28 +21,11 @@ fn main() -> std::io::Result<()> {
 
     for line in reader.lines() {
         let ip_hostname = match line {
-            Ok(v) => {
-                let line_str = v.trim();
-                let not_empty_line = !line_str.is_empty();
-                let not_starting_with_hastag = !line_str.starts_with("#");
-                if not_empty_line && not_starting_with_hastag {
-                    line_str.to_string()
-                } else {
-                    continue;
-                }
-            }
+            Ok(v) => extract_hosts(&v),
             Err(_) => continue,
         };
 
-        let ip_hostname_split: Vec<&str> = ip_hostname.split_whitespace().collect();
-        if let Some((ip, hosts)) = ip_hostname_split.split_first() {
-            for host in hosts {
-                ip_host_map
-                    .entry(ip.to_string())
-                    .or_insert_with(Vec::new)
-                    .push(host.to_string());
-            }
-        }
+        add_hosts_to_map(&ip_hostname, &mut ip_host_map);
     }
 
     let tmp_dir = std::env::temp_dir();
@@ -71,6 +54,29 @@ fn main() -> std::io::Result<()> {
             write_file(&mut ip_host_map, &tmp_hosts)
         }
         Err(_) => Ok(()),
+    }
+}
+
+fn extract_hosts(value: &str) -> String {
+    let line_str = value.trim();
+    let not_empty_line = !line_str.is_empty();
+    let not_starting_with_hastag = !line_str.starts_with("#");
+    if not_empty_line && not_starting_with_hastag {
+        line_str.to_string()
+    } else {
+        "".to_string()
+    }
+}
+
+fn add_hosts_to_map(ip_hostname: &str, ip_host_map: &mut HashMap<String, Vec<String>>) {
+    let ip_hostname_split: Vec<&str> = ip_hostname.split_whitespace().collect();
+    if let Some((ip, hostnames)) = ip_hostname_split.split_first() {
+        for name in hostnames {
+            ip_host_map
+                .entry(ip.to_string())
+                .or_insert_with(Vec::new)
+                .push(name.to_string());
+        }
     }
 }
 
