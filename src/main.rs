@@ -9,16 +9,6 @@ fn main() -> std::io::Result<()> {
     let file = File::open(filepath)?;
     let reader = io::BufReader::new(file);
 
-    let tmp_dir = std::env::temp_dir();
-    let tmp_hosts = if let Some(file_name) = filepath.file_name() {
-        tmp_dir.join(file_name)
-    } else {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "No file name in path",
-        ));
-    };
-
     let mut ip_host_map: HashMap<String, Vec<String>> = HashMap::new();
 
     for line in reader.lines() {
@@ -47,6 +37,16 @@ fn main() -> std::io::Result<()> {
         }
     }
 
+    let tmp_dir = std::env::temp_dir();
+    let tmp_hosts = if let Some(file_name) = filepath.file_name() {
+        tmp_dir.join(file_name)
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "No file name in path",
+        ));
+    };
+
     match is_tailscale_exists() {
         Ok(_) => {
             let tailscale_ip_host = list_tailscale_ip().unwrap();
@@ -57,7 +57,7 @@ fn main() -> std::io::Result<()> {
                     .or_insert_with(Vec::new)
                     .push(hostname);
             }
-            write_file(&ip_host_map, &tmp_hosts)
+            write_file(&mut ip_host_map, &tmp_hosts)
         }
         Err(_) => Ok(()),
     }
@@ -102,7 +102,7 @@ fn list_tailscale_ip() -> io::Result<Vec<(String, String)>> {
 }
 
 fn write_file(
-    ip_host_map: &HashMap<String, Vec<String>>,
+    ip_host_map: &mut HashMap<String, Vec<String>>,
     tmp_hosts: &PathBuf,
 ) -> std::io::Result<()> {
     let mut hosts_file = OpenOptions::new()
@@ -111,10 +111,28 @@ fn write_file(
         .truncate(true)
         .open(tmp_hosts)?;
 
-    for (ip, hosts) in ip_host_map {
+    let mut write_line = |ip: &str, hosts: &Vec<String>| -> std::io::Result<()> {
         let line = format!("{} {}", ip, hosts.join(" "));
         hosts_file.write_all(line.as_bytes())?;
         hosts_file.write_all(b"\n")?;
+        Ok(())
+    };
+
+    // Ensure placement of default loopback address is always on the top
+    let localhost_hosts = ip_host_map
+        .remove("127.0.0.1")
+        .unwrap_or_else(|| vec!["localhost".to_string()]);
+    write_line("127.0.0.1", &localhost_hosts)?;
+
+    // Same as above but specifically for ipv6
+    let ipv6_localhost_hosts = ip_host_map
+        .remove("::1")
+        .unwrap_or_else(|| vec!["localhost".to_string()]);
+    write_line("::1", &ipv6_localhost_hosts)?;
+
+    for (ip, hosts) in ip_host_map {
+        write_line(ip, hosts)?;
     }
+
     Ok(())
 }
