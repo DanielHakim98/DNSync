@@ -59,11 +59,14 @@ fn main() -> std::io::Result<()> {
         Ok(_) => {
             let tailscale_ip_host = list_tailscale_ip().unwrap();
             for tup in tailscale_ip_host {
-                let (ip, hostname) = tup;
-                ip_host_map
-                    .entry(ip)
-                    .or_insert_with(Vec::new)
-                    .push(hostname);
+                let (ip, hostname_tailscale) = tup;
+                let hostname_list = ip_host_map.entry(ip).or_insert_with(Vec::new);
+                let not_contain_hostname_tailscale = !hostname_list.contains(&hostname_tailscale);
+
+                // prevent duplicates in hostname_list in particular ip
+                if not_contain_hostname_tailscale {
+                    hostname_list.push(hostname_tailscale);
+                }
             }
             write_file(&mut ip_host_map, &tmp_hosts)
         }
