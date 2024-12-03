@@ -111,24 +111,30 @@ fn write_file(
         .truncate(true)
         .open(tmp_hosts)?;
 
+    let default_ip = vec!["127.0.0.1".to_string(), "::1".to_string()];
+    let max_ip_len = ip_host_map
+        .keys()
+        .chain(default_ip.iter())
+        .map(|ip| ip.len())
+        .max()
+        .unwrap_or(0);
+
     let mut write_line = |ip: &str, hosts: &Vec<String>| -> std::io::Result<()> {
-        let line = format!("{} {}", ip, hosts.join(" "));
+        let padded_ip = format!("{:width$}", ip, width = max_ip_len);
+        let line = format!("{} {}", padded_ip, hosts.join(" "));
         hosts_file.write_all(line.as_bytes())?;
         hosts_file.write_all(b"\n")?;
         Ok(())
     };
 
     // Ensure placement of default loopback address is always on the top
-    let localhost_hosts = ip_host_map
-        .remove("127.0.0.1")
-        .unwrap_or_else(|| vec!["localhost".to_string()]);
-    write_line("127.0.0.1", &localhost_hosts)?;
-
     // Same as above but specifically for ipv6
-    let ipv6_localhost_hosts = ip_host_map
-        .remove("::1")
-        .unwrap_or_else(|| vec!["localhost".to_string()]);
-    write_line("::1", &ipv6_localhost_hosts)?;
+    for ip in default_ip {
+        let localhost_hosts = ip_host_map
+            .remove(&ip)
+            .unwrap_or_else(|| vec!["localhost".to_string()]);
+        write_line(&ip, &localhost_hosts)?;
+    }
 
     for (ip, hosts) in ip_host_map {
         write_line(ip, hosts)?;
