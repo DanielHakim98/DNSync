@@ -1,24 +1,49 @@
 use clap::Parser;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, ErrorKind, Write};
 use std::path::PathBuf;
 use std::process::Command;
 
 #[derive(Parser, Debug)]
 struct Cli {
     #[arg(short, long, default_value = "/etc/hosts")]
-    path: PathBuf,
+    source: PathBuf,
+
+    #[arg(short, long, default_value = "/tmp/hosts")]
+    target: PathBuf,
 }
 
 fn main() -> std::io::Result<()> {
     let args = Cli::parse();
-    let filepath = args.path;
-    let file = File::open(&filepath)?;
+    let source_filepath = args.source;
+    let file = File::open(&source_filepath).unwrap_or_else(|err| {
+        if err.kind() == ErrorKind::NotFound {
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(&source_filepath)
+                .unwrap_or_else(|err| {
+                    eprintln!(
+                        "Error: '{}': {}",
+                        source_filepath.to_str().unwrap(),
+                        err.to_string()
+                    );
+                    std::process::exit(1)
+                })
+        } else {
+            eprintln!(
+                "Error: '{}': {}",
+                source_filepath.to_str().unwrap(),
+                err.to_string()
+            );
+            std::process::exit(1)
+        }
+    });
+
     let reader = io::BufReader::new(file);
-
     let mut ip_host_map: HashMap<String, Vec<String>> = HashMap::new();
-
     for line in reader.lines() {
         let ip_hostname = match line {
             Ok(v) => extract_hosts(&v),
@@ -28,19 +53,23 @@ fn main() -> std::io::Result<()> {
         add_hosts_to_map(&ip_hostname, &mut ip_host_map);
     }
 
-    let tmp_dir = std::env::temp_dir();
-    let tmp_hosts = if let Some(file_name) = filepath.file_name() {
-        tmp_dir.join(file_name)
+    // if user gives filename in --target, then use that
+    // else, assume filename is implicitly taken from --source
+    let target = args.target;
+
+    let target_filepath = if let Some(_) = target.file_name() {
+        target
     } else {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "No file name in path",
-        ));
+        target.join(source_filepath.file_name().unwrap())
     };
 
     match is_tailscale_exists() {
-        Ok(_) => {
-            let tailscale_ip_host = list_tailscale_ip().unwrap();
+        Ok(true) => {
+            let tailscale_ip_host = list_tailscale_ip().unwrap_or_else(|error| {
+                eprintln!("Error: 'tailscale status' :{}", error.to_string());
+                std::process::exit(1)
+            });
+
             for tup in tailscale_ip_host {
                 let (ip, hostname_tailscale) = tup;
                 let hostname_list = ip_host_map.entry(ip).or_insert_with(Vec::new);
@@ -51,9 +80,16 @@ fn main() -> std::io::Result<()> {
                     hostname_list.push(hostname_tailscale);
                 }
             }
-            write_file(&mut ip_host_map, &tmp_hosts)
+            write_file(&mut ip_host_map, &target_filepath)
         }
-        Err(_) => Ok(()),
+        Ok(false) => {
+            eprintln!("Error: 'tailscale --version': tailscale installed but not working");
+            std::process::exit(1)
+        }
+        Err(error) => {
+            eprintln!("Error: 'tailscale status': {}", error.to_string());
+            std::process::exit(1)
+        }
     }
 }
 
@@ -81,10 +117,10 @@ fn add_hosts_to_map(ip_hostname: &str, ip_host_map: &mut HashMap<String, Vec<Str
 }
 
 fn is_tailscale_exists() -> io::Result<bool> {
-    Command::new("tailscale")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
+    match Command::new("tailscale").arg("--version").output() {
+        Ok(output) => Ok(output.status.success()),
+        Err(e) => Err(e),
+    }
 }
 
 fn list_tailscale_ip() -> io::Result<Vec<(String, String)>> {
@@ -120,13 +156,9 @@ fn list_tailscale_ip() -> io::Result<Vec<(String, String)>> {
 
 fn write_file(
     ip_host_map: &mut HashMap<String, Vec<String>>,
-    tmp_hosts: &PathBuf,
+    target_filepath: &PathBuf,
 ) -> std::io::Result<()> {
-    let mut hosts_file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(tmp_hosts)?;
+    let mut hosts_file = OpenOptions::new().write(true).open(target_filepath)?;
 
     let default_ip = vec!["127.0.0.1".to_string(), "::1".to_string()];
     let max_ip_len = ip_host_map
