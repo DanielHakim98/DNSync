@@ -213,3 +213,19 @@ fn write_file(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_hosts_ok() {
+        let input =
+            "127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4";
+        let result = extract_hosts(input);
+        let expected = String::from(
+            "127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4",
+        );
+        assert_eq!(result, expected);
+    }
+}
