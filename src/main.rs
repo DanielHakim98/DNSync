@@ -130,6 +130,10 @@ fn add_hosts_to_map(ip_hostname: &str, ip_host_map: &mut HashMap<String, Vec<Str
 fn is_tailscale_exists() -> io::Result<bool> {
     match Command::new("tailscale").arg("--version").output() {
         Ok(output) => Ok(output.status.success()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Tailscale binary not found",
+        )),
         Err(e) => Err(e),
     }
 }
@@ -147,7 +151,7 @@ fn list_tailscale_ip() -> io::Result<Vec<(String, String)>> {
     let output_str = String::from_utf8_lossy(&output.stdout);
     let mut result = Vec::new();
 
-    for line in output_str.lines() {
+    for line in output_str.lines().map(str::trim).filter(|l| !l.is_empty()) {
         let parts: Vec<&str> = line.split_whitespace().collect();
 
         if parts.len() >= 2 {
@@ -168,11 +172,15 @@ fn list_tailscale_ip() -> io::Result<Vec<(String, String)>> {
 fn write_file(
     ip_host_map: &mut HashMap<String, Vec<String>>,
     target_filepath: &PathBuf,
-) -> std::io::Result<()> {
+) -> io::Result<()> {
     let mut hosts_file = OpenOptions::new()
         .create(true)
         .write(true)
         .open(target_filepath)?;
+
+    if ip_host_map.is_empty() {
+        eprintln!("Warning: ip_host_map is empty, only default IPs will be written.");
+    }
 
     let default_ip = vec!["127.0.0.1".to_string(), "::1".to_string()];
     let max_ip_len = ip_host_map
