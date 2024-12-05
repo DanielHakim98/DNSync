@@ -10,29 +10,28 @@ struct Cli {
     #[arg(short, long, default_value = "/etc/hosts")]
     source: PathBuf,
 
-    #[arg(short, long, default_value = "/tmp/hosts")]
+    #[arg(short = 'p', long, default_value = "/tmp/hosts.temp")]
+    temp: PathBuf,
+
+    #[arg(short, long, default_value = "/etc/hosts.old")]
+    backup: PathBuf,
+
+    #[arg(short = 't', long, default_value = "/etc/hosts")]
     target: PathBuf,
 }
 
-fn main() -> std::io::Result<()> {
+fn main() {
     let args = Cli::parse();
     let source_filepath = args.source;
-    let file = File::open(&source_filepath).unwrap_or_else(|err| {
-        if err.kind() == ErrorKind::NotFound {
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(&source_filepath)
-                .unwrap_or_else(|err| {
-                    eprintln!(
-                        "Error: '{}': {}",
-                        source_filepath.to_str().unwrap(),
-                        err.to_string()
-                    );
-                    std::process::exit(1)
-                })
-        } else {
+    let file = File::open(&source_filepath).unwrap_or_else(|err| match err.kind() {
+        ErrorKind::NotFound => {
+            eprintln!(
+                "Error: '/etc/hosts': No such file or directory. Please ensure '{}' exists",
+                &source_filepath.to_str().unwrap()
+            );
+            std::process::exit(1);
+        }
+        _ => {
             eprintln!(
                 "Error: '{}': {}",
                 source_filepath.to_str().unwrap(),
@@ -42,6 +41,7 @@ fn main() -> std::io::Result<()> {
         }
     });
 
+    // TODO: Should skip reading if the source_path is just created
     let reader = io::BufReader::new(file);
     let mut ip_host_map: HashMap<String, Vec<String>> = HashMap::new();
     for line in reader.lines() {
@@ -53,35 +53,20 @@ fn main() -> std::io::Result<()> {
         add_hosts_to_map(&ip_hostname, &mut ip_host_map);
     }
 
-    // if user gives filename in --target, then use that
-    // else, assume filename is implicitly taken from --source
-    let target = args.target;
-
+    // if 'filename' is included in --target, then use that
+    // else, assume 'filename' is implicitly taken from --source
+    let target = args.temp;
     let target_filepath = if let Some(_) = target.file_name() {
         target
     } else {
         target.join(source_filepath.file_name().unwrap())
     };
 
-    match is_tailscale_exists() {
-        Ok(true) => {
-            let tailscale_ip_host = list_tailscale_ip().unwrap_or_else(|error| {
-                eprintln!("Error: 'tailscale status' :{}", error.to_string());
-                std::process::exit(1)
-            });
-
-            for tup in tailscale_ip_host {
-                let (ip, hostname_tailscale) = tup;
-                let hostname_list = ip_host_map.entry(ip).or_insert_with(Vec::new);
-                let not_contain_hostname_tailscale = !hostname_list.contains(&hostname_tailscale);
-
-                // prevent duplicates in hostname_list in particular ip
-                if not_contain_hostname_tailscale {
-                    hostname_list.push(hostname_tailscale);
-                }
-            }
-            write_file(&mut ip_host_map, &target_filepath)
-        }
+    let tailscale_ip_hosts = match is_tailscale_exists() {
+        Ok(true) => list_tailscale_ip().unwrap_or_else(|error| {
+            eprintln!("Error: 'tailscale status' :{}", error.to_string());
+            std::process::exit(1)
+        }),
         Ok(false) => {
             eprintln!("Error: 'tailscale --version': tailscale installed but not working");
             std::process::exit(1)
@@ -90,7 +75,33 @@ fn main() -> std::io::Result<()> {
             eprintln!("Error: 'tailscale status': {}", error.to_string());
             std::process::exit(1)
         }
+    };
+
+    for tup in tailscale_ip_hosts {
+        let (ip, hostname_tailscale) = tup;
+        let hostname_list = ip_host_map.entry(ip).or_insert_with(Vec::new);
+        let not_contain_hostname_tailscale = !hostname_list.contains(&hostname_tailscale);
+
+        // prevent duplicates in hostname_list in particular ip
+        if not_contain_hostname_tailscale {
+            hostname_list.push(hostname_tailscale);
+        }
     }
+
+    write_file(&mut ip_host_map, &target_filepath).unwrap_or_else(|err| {
+        match err.kind() {
+            std::io::ErrorKind::NotFound => {
+                eprintln!(
+                    "Error: '{}' does not exist. Please ensure the file path is correct.",
+                    target_filepath.to_string_lossy()
+                );
+            }
+            _ => {
+                eprintln!("Error: '{}': {}", target_filepath.to_string_lossy(), err);
+            }
+        }
+        std::process::exit(1);
+    });
 }
 
 fn extract_hosts(value: &str) -> String {
@@ -158,7 +169,10 @@ fn write_file(
     ip_host_map: &mut HashMap<String, Vec<String>>,
     target_filepath: &PathBuf,
 ) -> std::io::Result<()> {
-    let mut hosts_file = OpenOptions::new().write(true).open(target_filepath)?;
+    let mut hosts_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(target_filepath)?;
 
     let default_ip = vec!["127.0.0.1".to_string(), "::1".to_string()];
     let max_ip_len = ip_host_map
