@@ -228,4 +228,20 @@ mod tests {
         );
         assert_eq!(result, expected);
     }
+
+    #[test]
+    fn test_extract_hosts_commented() {
+        let input = "# 192.168.1.10 foo.example.org foo";
+        let result = extract_hosts(input);
+        let expected = String::from("");
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_extract_hosts_empty_line() {
+        let input = "";
+        let result = extract_hosts(input);
+        let expected = String::from("");
+        assert_eq!(result, expected);
+    }
 }
