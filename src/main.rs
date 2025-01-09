@@ -55,11 +55,11 @@ fn main() {
 
     // if 'filename' is included in --target, then use that
     // else, assume 'filename' is implicitly taken from --source
-    let target = args.temp;
-    let target_filepath = if let Some(_) = target.file_name() {
-        target
+    let temp = args.temp;
+    let temp_filepath = if let Some(_) = temp.file_name() {
+        temp
     } else {
-        target.join(source_filepath.file_name().unwrap())
+        temp.join(source_filepath.file_name().unwrap())
     };
 
     let tailscale_ip_hosts = match is_tailscale_exists() {
@@ -88,20 +88,33 @@ fn main() {
         }
     }
 
-    write_file(&mut ip_host_map, &target_filepath).unwrap_or_else(|err| {
+    write_file(&mut ip_host_map, &temp_filepath).unwrap_or_else(|err| {
         match err.kind() {
             std::io::ErrorKind::NotFound => {
                 eprintln!(
                     "Error: '{}' does not exist. Please ensure the file path is correct.",
-                    target_filepath.to_string_lossy()
+                    temp_filepath.to_string_lossy()
                 );
             }
             _ => {
-                eprintln!("Error: '{}': {}", target_filepath.to_string_lossy(), err);
+                eprintln!("Error: '{}': {}", temp_filepath.to_string_lossy(), err);
             }
         }
         std::process::exit(1);
     });
+
+    create_backup(&source_filepath)
+        .unwrap_or_else(|err| eprintln!("Error: '{}': {}", source_filepath.to_string_lossy(), err));
+
+    let target: PathBuf = args.target;
+    let target_filepath = if let Some(_) = target.file_name() {
+        target
+    } else {
+        target.join(source_filepath.file_name().unwrap())
+    };
+
+    replace_source_file(&target_filepath, &temp_filepath)
+        .unwrap_or_else(|err| eprintln!("Error: '{}': {}", temp_filepath.to_string_lossy(), err));
 }
 
 fn extract_hosts(value: &str) -> String {
@@ -211,6 +224,21 @@ fn write_file(
         write_line(ip, hosts)?;
     }
 
+    Ok(())
+}
+
+fn create_backup(source_filepath: &PathBuf) -> io::Result<()> {
+    let backup_filepath = source_filepath.with_extension("old");
+    std::fs::copy(source_filepath, backup_filepath)?;
+    Ok(())
+}
+
+fn replace_source_file(target_filepath: &PathBuf, source_filepath: &PathBuf) -> io::Result<()> {
+    println!(
+        "target: {:?}, source: {:?}",
+        target_filepath, source_filepath
+    );
+    std::fs::copy(source_filepath, target_filepath)?;
     Ok(())
 }
 
